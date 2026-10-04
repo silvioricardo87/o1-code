@@ -692,10 +692,15 @@ function VirtualizedList<T>(
     [getScrollbarGeometry],
   );
 
+  // Set by the imperative scroll methods and consumed by the scrollbar flash
+  // effect, so content growth never counts as a user scroll.
+  const userScrollPending = useRef(false);
+
   const scrollToScrollbarRow = useCallback(
     (row: number) => {
       const geometry = getScrollbarGeometry();
       if (!geometry) return;
+      userScrollPending.current = true;
 
       const zeroBasedRow = row - 1;
       const rowInTrack = Math.max(
@@ -733,6 +738,7 @@ function VirtualizedList<T>(
     ref,
     () => ({
       scrollBy: (delta: number) => {
+        userScrollPending.current = true;
         if (delta < 0) {
           setIsStickingToBottom(false);
         }
@@ -760,6 +766,7 @@ function VirtualizedList<T>(
         setScrollAnchor(getAnchorForScrollTop(newScrollTop, offsets));
       },
       scrollTo: (offset: number) => {
+        userScrollPending.current = true;
         const maxScroll = Math.max(0, totalHeight - scrollableContainerHeight);
         if (offset >= maxScroll || offset === SCROLL_TO_ITEM_END) {
           setIsStickingToBottom(true);
@@ -778,6 +785,7 @@ function VirtualizedList<T>(
         }
       },
       scrollToEnd: () => {
+        userScrollPending.current = true;
         setIsStickingToBottom(true);
         setPendingScrollTop(Number.MAX_SAFE_INTEGER);
         if (data.length > 0) {
@@ -796,6 +804,7 @@ function VirtualizedList<T>(
         viewOffset?: number;
         viewPosition?: number;
       }) => {
+        userScrollPending.current = true;
         setIsStickingToBottom(false);
         const offset = offsets[index];
         if (offset !== undefined) {
@@ -823,6 +832,7 @@ function VirtualizedList<T>(
         viewOffset?: number;
         viewPosition?: number;
       }) => {
+        userScrollPending.current = true;
         setIsStickingToBottom(false);
         const index = data.indexOf(item);
         if (index !== -1) {
@@ -885,12 +895,20 @@ function VirtualizedList<T>(
   // layout-effect keyed on it is the cheapest "the user just scrolled"
   // signal we have. Skip the very first commit (no scroll happened) so
   // we don't paint a flash on initial mount.
+  // Only a scroll the user asked for flashes the bar. While the view sticks
+  // to the bottom of a streaming response, `clampedScrollTop` grows with the
+  // content on every chunk; flashing on that kept the idle timer re-arming
+  // and the bar rendering for the whole response without any scroll.
   const isInitialScrollFlash = useRef(true);
   useLayoutEffect(() => {
     if (isInitialScrollFlash.current) {
       isInitialScrollFlash.current = false;
       return;
     }
+    if (!userScrollPending.current) {
+      return;
+    }
+    userScrollPending.current = false;
     flashScrollbar();
   }, [clampedScrollTop, flashScrollbar]);
 

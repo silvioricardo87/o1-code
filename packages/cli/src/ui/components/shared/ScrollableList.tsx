@@ -40,33 +40,6 @@ function ScrollableList<T>(
   const virtualizedListRef = useRef<VirtualizedListRef<T>>(null);
   const isDraggingScrollbar = useRef(false);
 
-  useImperativeHandle(
-    ref,
-    () => ({
-      scrollBy: (delta) => virtualizedListRef.current?.scrollBy(delta),
-      scrollTo: (offset) => virtualizedListRef.current?.scrollTo(offset),
-      scrollToEnd: () => virtualizedListRef.current?.scrollToEnd(),
-      scrollToIndex: (params) =>
-        virtualizedListRef.current?.scrollToIndex(params),
-      scrollToItem: (params) =>
-        virtualizedListRef.current?.scrollToItem(params),
-      hitTestScrollbar: (location) =>
-        virtualizedListRef.current?.hitTestScrollbar(location) ?? false,
-      scrollToScrollbarRow: (row) =>
-        virtualizedListRef.current?.scrollToScrollbarRow(row),
-      getScrollIndex: () => virtualizedListRef.current?.getScrollIndex() ?? 0,
-      getScrollState: () =>
-        virtualizedListRef.current?.getScrollState() ?? {
-          scrollTop: 0,
-          scrollHeight: 0,
-          innerHeight: 0,
-        },
-      getViewportRect: () =>
-        virtualizedListRef.current?.getViewportRect() ?? null,
-    }),
-    [],
-  );
-
   const getScrollState = useCallback(
     () =>
       virtualizedListRef.current?.getScrollState() ?? {
@@ -75,32 +48,6 @@ function ScrollableList<T>(
         innerHeight: 0,
       },
     [],
-  );
-
-  useKeypress(
-    useCallback(
-      (key: Key) => {
-        if (keyMatchers[Command.SCROLL_UP](key)) {
-          virtualizedListRef.current?.scrollBy(-1);
-        } else if (keyMatchers[Command.SCROLL_DOWN](key)) {
-          virtualizedListRef.current?.scrollBy(1);
-        } else if (keyMatchers[Command.PAGE_UP](key)) {
-          const state = getScrollState();
-          const delta = state.innerHeight > 0 ? state.innerHeight : 20;
-          virtualizedListRef.current?.scrollBy(-delta);
-        } else if (keyMatchers[Command.PAGE_DOWN](key)) {
-          const state = getScrollState();
-          const delta = state.innerHeight > 0 ? state.innerHeight : 20;
-          virtualizedListRef.current?.scrollBy(delta);
-        } else if (keyMatchers[Command.SCROLL_HOME](key)) {
-          virtualizedListRef.current?.scrollTo(0);
-        } else if (keyMatchers[Command.SCROLL_END](key)) {
-          virtualizedListRef.current?.scrollToEnd();
-        }
-      },
-      [getScrollState],
-    ),
-    { isActive: hasFocus },
   );
 
   // Mouse scrolling. Legacy `<Static>` mode let the host terminal scroll its
@@ -146,6 +93,84 @@ function ScrollableList<T>(
     pendingDragRow.current = null;
     cancelScrollFlush();
   }, [cancelScrollFlush]);
+
+  // Keyboard scrolling goes through the same coalesced path as the wheel: a
+  // held key arrives as a burst of repeats, and terminals that translate the
+  // wheel into arrow keys deliver one key per row. The first key lands at
+  // once; the rest of the burst is summed into the next frame. Home/End are
+  // absolute, so they drop any queued relative intent and apply immediately.
+  const queueKeyboardScroll = useCallback(
+    (delta: number) => {
+      pendingWheelDelta.current += delta;
+      scheduleScrollFlush();
+    },
+    [scheduleScrollFlush],
+  );
+
+  // The relative `scrollBy` exposed to the app (the bare arrows on an empty
+  // prompt arrive here through ScrollContext) is coalesced like a key burst;
+  // the absolute methods apply at once and drop any queued relative intent.
+  useImperativeHandle(
+    ref,
+    () => ({
+      scrollBy: (delta) => queueKeyboardScroll(delta),
+      scrollTo: (offset) => {
+        cancelPendingScroll();
+        virtualizedListRef.current?.scrollTo(offset);
+      },
+      scrollToEnd: () => {
+        cancelPendingScroll();
+        virtualizedListRef.current?.scrollToEnd();
+      },
+      scrollToIndex: (params) => {
+        cancelPendingScroll();
+        virtualizedListRef.current?.scrollToIndex(params);
+      },
+      scrollToItem: (params) => {
+        cancelPendingScroll();
+        virtualizedListRef.current?.scrollToItem(params);
+      },
+      hitTestScrollbar: (location) =>
+        virtualizedListRef.current?.hitTestScrollbar(location) ?? false,
+      scrollToScrollbarRow: (row) => {
+        cancelPendingScroll();
+        virtualizedListRef.current?.scrollToScrollbarRow(row);
+      },
+      getScrollIndex: () => virtualizedListRef.current?.getScrollIndex() ?? 0,
+      getScrollState,
+      getViewportRect: () =>
+        virtualizedListRef.current?.getViewportRect() ?? null,
+    }),
+    [queueKeyboardScroll, cancelPendingScroll, getScrollState],
+  );
+
+  useKeypress(
+    useCallback(
+      (key: Key) => {
+        if (keyMatchers[Command.SCROLL_UP](key)) {
+          queueKeyboardScroll(-1);
+        } else if (keyMatchers[Command.SCROLL_DOWN](key)) {
+          queueKeyboardScroll(1);
+        } else if (keyMatchers[Command.PAGE_UP](key)) {
+          const state = getScrollState();
+          queueKeyboardScroll(
+            -(state.innerHeight > 0 ? state.innerHeight : 20),
+          );
+        } else if (keyMatchers[Command.PAGE_DOWN](key)) {
+          const state = getScrollState();
+          queueKeyboardScroll(state.innerHeight > 0 ? state.innerHeight : 20);
+        } else if (keyMatchers[Command.SCROLL_HOME](key)) {
+          cancelPendingScroll();
+          virtualizedListRef.current?.scrollTo(0);
+        } else if (keyMatchers[Command.SCROLL_END](key)) {
+          cancelPendingScroll();
+          virtualizedListRef.current?.scrollToEnd();
+        }
+      },
+      [getScrollState, queueKeyboardScroll, cancelPendingScroll],
+    ),
+    { isActive: hasFocus },
+  );
 
   const handleMouseEvent = useCallback(
     (event: MouseEvent) => {

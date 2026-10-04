@@ -9,6 +9,10 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- Scrolling the conversation responds in the same frame: the first wheel tick or key of a burst
+  moves the view at once and the rest of the burst is applied once per frame, for the mouse wheel
+  and for Shift+↑/↓, PgUp/PgDn and the bare arrows on an empty prompt alike. The scrollbar shows
+  only when you scroll, not while a response grows at the bottom.
 - The repository now lives at `github.com/organizaone/o1-code`. Links in the interface
   (documentation, "report an issue", release notes), in the package metadata and in the
   documentation point there; the old address redirects.

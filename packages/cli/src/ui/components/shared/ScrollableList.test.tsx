@@ -105,6 +105,37 @@ describe('<ScrollableList /> mouse scrolling', () => {
     expect(lastFrame()).toContain('item-0');
   });
 
+  it('applies the first wheel tick without waiting for the frame timer', async () => {
+    const listRef = createRef<ScrollableListRef<Item>>();
+    const renderItem = ({ item }: { item: Item }) => <Text>{item.label}</Text>;
+    const Wrapper = () => (
+      <ScrollableList<Item>
+        ref={listRef}
+        hasFocus
+        data={makeItems(200)}
+        renderItem={renderItem}
+        estimatedItemHeight={estimatedItemHeight}
+        keyExtractor={keyExtractor}
+        initialScrollIndex={SCROLL_TO_ITEM_END}
+        initialScrollOffsetInIndex={SCROLL_TO_ITEM_END}
+        containerHeight={5}
+        width={40}
+        showScrollbar={false}
+      />
+    );
+
+    const { stdin, rerender } = render(withKeypress(<Wrapper />));
+    rerender(withKeypress(<Wrapper />));
+    await act(async () => {});
+    expect(listRef.current?.getScrollState().scrollTop).toBe(195);
+
+    await act(async () => {
+      stdin.write(wheelUp(5, 5));
+    });
+    // No flushScrollFrame(): the first tick of a burst must land at once.
+    expect(listRef.current?.getScrollState().scrollTop).toBe(192);
+  });
+
   it('preserves the full delta of a coalesced wheel burst', async () => {
     const listRef = createRef<ScrollableListRef<Item>>();
     const renderItem = ({ item }: { item: Item }) => <Text>{item.label}</Text>;
@@ -368,6 +399,70 @@ const CTRL_END = `${ESC}[1;5F`;
 
 describe('<ScrollableList /> keyboard scroll', () => {
   const renderItem = ({ item }: { item: Item }) => <Text>{item.label}</Text>;
+
+  it('coalesces a burst of Shift+Up repeats: first key at once, the rest in the next frame', async () => {
+    const listRef = createRef<ScrollableListRef<Item>>();
+    const Wrapper = () => (
+      <ScrollableList<Item>
+        ref={listRef}
+        hasFocus
+        data={makeItems(50)}
+        renderItem={renderItem}
+        estimatedItemHeight={estimatedItemHeight}
+        keyExtractor={keyExtractor}
+        initialScrollIndex={10}
+        containerHeight={5}
+        width={40}
+        showScrollbar={false}
+      />
+    );
+
+    const { stdin, rerender } = render(withKeypress(<Wrapper />));
+    rerender(withKeypress(<Wrapper />));
+    await act(async () => {});
+    expect(listRef.current?.getScrollState().scrollTop).toBe(10);
+
+    // A held key arrives as one read of several repeats. Synchronous act:
+    // an awaited act would let the real frame timer fire before the assert.
+    act(() => {
+      stdin.write(SHIFT_UP.repeat(5));
+    });
+    expect(listRef.current?.getScrollState().scrollTop).toBe(9);
+
+    await flushScrollFrame();
+    expect(listRef.current?.getScrollState().scrollTop).toBe(5);
+  });
+
+  it('coalesces scrollBy calls from the ref the same way (bare arrows on an empty prompt)', async () => {
+    const listRef = createRef<ScrollableListRef<Item>>();
+    const Wrapper = () => (
+      <ScrollableList<Item>
+        ref={listRef}
+        hasFocus
+        data={makeItems(50)}
+        renderItem={renderItem}
+        estimatedItemHeight={estimatedItemHeight}
+        keyExtractor={keyExtractor}
+        initialScrollIndex={10}
+        containerHeight={5}
+        width={40}
+        showScrollbar={false}
+      />
+    );
+
+    const { rerender } = render(withKeypress(<Wrapper />));
+    rerender(withKeypress(<Wrapper />));
+    await act(async () => {});
+    expect(listRef.current?.getScrollState().scrollTop).toBe(10);
+
+    act(() => {
+      for (let i = 0; i < 5; i++) listRef.current?.scrollBy(-1);
+    });
+    expect(listRef.current?.getScrollState().scrollTop).toBe(9);
+
+    await flushScrollFrame();
+    expect(listRef.current?.getScrollState().scrollTop).toBe(5);
+  });
 
   it('Shift+Up scrolls up by 1 line', async () => {
     const Wrapper = () => (

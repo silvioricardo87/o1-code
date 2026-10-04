@@ -1384,3 +1384,51 @@ describe('<VirtualizedList /> VP collapsed thought groups', () => {
     );
   });
 });
+
+describe('<VirtualizedList /> scrollbar flash', () => {
+  type RefShape = VirtualizedListRef<Item>;
+
+  function mountStuckToBottom(initialCount: number) {
+    let listRef: RefShape | null = null;
+    function Wrapper({ count }: { count: number }) {
+      const ref = useRef<RefShape>(null);
+      if (ref.current) listRef = ref.current;
+      return (
+        <VirtualizedList<Item>
+          ref={ref}
+          data={makeItems(count)}
+          renderItem={renderItem}
+          estimatedItemHeight={estimatedItemHeight}
+          keyExtractor={keyExtractor}
+          initialScrollIndex={SCROLL_TO_ITEM_END}
+          initialScrollOffsetInIndex={SCROLL_TO_ITEM_END}
+          containerHeight={5}
+          width={40}
+          showScrollbar
+        />
+      );
+    }
+    const harness = render(<Wrapper count={initialCount} />);
+    harness.rerender(<Wrapper count={initialCount} />);
+    return { ...harness, Wrapper, getRef: () => listRef };
+  }
+
+  it('does not flash the scrollbar when content grows while stuck to the bottom', () => {
+    const { rerender, lastFrame, Wrapper } = mountStuckToBottom(30);
+    expect(lastFrame() ?? '').not.toContain('█');
+
+    rerender(<Wrapper count={31} />);
+    rerender(<Wrapper count={32} />);
+    expect(lastFrame() ?? '').toContain('item-31');
+    expect(lastFrame() ?? '').not.toContain('█');
+  });
+
+  it('flashes the scrollbar on a user scroll', () => {
+    const { rerender, lastFrame, Wrapper, getRef } = mountStuckToBottom(30);
+    act(() => {
+      getRef()!.scrollBy(-1);
+    });
+    rerender(<Wrapper count={30} />);
+    expect(lastFrame() ?? '').toContain('█');
+  });
+});
